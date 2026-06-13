@@ -358,6 +358,7 @@ import {
   BarChartOutlined, SearchOutlined
 } from '@vicons/antd'
 import { useAnnotationStore } from '@/stores/annotation'
+import { useTeamStore } from '@/stores/team'
 import { useSceneStore } from '@/stores/scene'
 import { useTimelineStore } from '@/stores/timeline'
 import type {
@@ -365,6 +366,7 @@ import type {
 } from '@/types'
 
 const annotationStore = useAnnotationStore()
+const teamStore = useTeamStore()
 const sceneStore = useSceneStore()
 const timelineStore = useTimelineStore()
 
@@ -443,7 +445,7 @@ const statusFilterOptions = [
 ]
 
 const assigneeOptions = computed(() =>
-  annotationStore.teamMembers.map((m) => ({
+  teamStore.teamMembers.map((m) => ({
     label: `${m.avatar} ${m.name}`,
     value: m.id,
   }))
@@ -512,15 +514,15 @@ function riskLevelLabel(level: RiskLevel) {
 }
 
 function getMemberName(id: string): string {
-  return annotationStore.getMemberById(id)?.name || '未指派'
+  return teamStore.getMemberById(id)?.name || '未指派'
 }
 
 function getMemberAvatar(id: string): string {
-  return annotationStore.getMemberById(id)?.avatar || '👤'
+  return teamStore.getMemberById(id)?.avatar || '👤'
 }
 
 function getMemberColor(id: string): string {
-  return annotationStore.getMemberById(id)?.color || '#909399'
+  return teamStore.getMemberById(id)?.color || '#909399'
 }
 
 function isOverdue(ann: Annotation): boolean {

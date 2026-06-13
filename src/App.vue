@@ -142,6 +142,7 @@ import { useTimelineStore } from '@/stores/timeline'
 import { usePlaybackStore } from '@/stores/playback'
 import { useSceneStore } from '@/stores/scene'
 import { useAnnotationStore } from '@/stores/annotation'
+import { useVersionStore } from '@/stores/version'
 import { TRACK_COLORS, TRACK_LABELS } from '@/types'
 import { useMessage } from 'naive-ui'
 
@@ -149,6 +150,7 @@ const timelineStore = useTimelineStore()
 const playbackStore = usePlaybackStore()
 const sceneStore = useSceneStore()
 const annotationStore = useAnnotationStore()
+const versionStore = useVersionStore()
 const message = useMessage()
 const rightTab = ref<'config' | 'annotation' | 'version'>('config')
 
@@ -167,7 +169,7 @@ watch(
 )
 
 watch(
-  () => annotationStore.showVersionPanel,
+  () => versionStore.showVersionPanel,
   (v) => {
     if (v) rightTab.value = 'version'
   }

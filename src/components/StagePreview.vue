@@ -239,10 +239,12 @@ import {
 } from 'naive-ui'
 import { usePlaybackStore, type CharacterOnStage } from '@/stores/playback'
 import { useAnnotationStore } from '@/stores/annotation'
+import { useTeamStore } from '@/stores/team'
 import type { StagePosition, RiskLevel } from '@/types'
 
 const playbackStore = usePlaybackStore()
 const annotationStore = useAnnotationStore()
+const teamStore = useTeamStore()
 const message = useMessage()
 
 const showPlaybackFilter = ref(false)
@@ -259,7 +261,7 @@ const playbackFilterOptions = [
 
 const assigneeFilterOptions = computed(() => [
   { label: '全部成员', value: 'all' },
-  ...annotationStore.teamMembers.map((m) => ({
+  ...teamStore.teamMembers.map((m) => ({
     label: `${m.avatar} ${m.name}`,
     value: m.id,
   })),

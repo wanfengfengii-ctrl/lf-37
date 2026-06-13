@@ -1,9 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { Scene, ValidationError } from '@/types'
-
-const genId = () => Math.random().toString(36).slice(2, 10)
-const STORAGE_KEY = 'shadow-puppet-stage'
+import { genId } from '@/utils/id'
+import { loadScenes, saveScenes, clearScenesStorage } from '@/utils/storage'
 
 function createDefaultScenes(): Scene[] {
   return [
@@ -17,44 +16,12 @@ function createDefaultScenes(): Scene[] {
   ]
 }
 
-interface StorageData {
-  scenes: Scene[]
-  version: number
-  savedAt?: string
-}
-
-function loadFromStorage(): { scenes: Scene[]; savedAt?: string } | null {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      const data: StorageData = JSON.parse(saved)
-      if (data.scenes && Array.isArray(data.scenes) && data.scenes.length > 0) {
-        return { scenes: data.scenes, savedAt: data.savedAt }
-      }
-    }
-  } catch (e) {
-    console.warn('[AutoRestore] Failed to load from storage:', e)
-  }
-  return null
-}
-
-function saveToStorage(scenes: Scene[]) {
-  try {
-    const data = {
-      scenes,
-      version: 1,
-      savedAt: new Date().toISOString(),
-    }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-  } catch (e) {
-    console.warn('[AutoSave] Failed to save to storage:', e)
-  }
-}
-
 export const useSceneStore = defineStore('scene', () => {
-  const savedData = loadFromStorage()
-  const initialScenes = savedData?.scenes || createDefaultScenes()
-  
+  const savedData = loadScenes<Scene>()
+  const initialScenes = savedData?.data && savedData.data.length > 0
+    ? savedData.data
+    : createDefaultScenes()
+
   const scenes = ref<Scene[]>(initialScenes)
   const currentSceneId = ref<string>(initialScenes[0].id)
   const validationErrors = ref<ValidationError[]>([])
@@ -69,33 +36,30 @@ export const useSceneStore = defineStore('scene', () => {
       clearTimeout(autoSaveTimer)
     }
     autoSaveTimer = window.setTimeout(() => {
-      saveToStorage(scenes.value)
+      saveScenes(scenes.value)
       lastSavedAt.value = new Date().toISOString()
       console.log('[AutoSave] Saved automatically at', new Date().toLocaleTimeString())
     }, 1000)
   }
 
   function restoreFromStorage(): { ok: boolean; message?: string } {
-    const saved = loadFromStorage()
-    if (saved) {
-      scenes.value = [...saved.scenes]
-      if (saved.scenes.length > 0) {
-        currentSceneId.value = saved.scenes[0].id
-      }
+    const saved = loadScenes<Scene>()
+    if (saved && saved.data && saved.data.length > 0) {
+      scenes.value = [...saved.data]
+      currentSceneId.value = saved.data[0].id
       lastSavedAt.value = saved.savedAt ?? new Date().toISOString()
-      return { ok: true, message: `已恢复 ${saved.scenes.length} 个场次` }
+      return { ok: true, message: `已恢复 ${saved.data.length} 个场次` }
     }
     return { ok: false, message: '没有找到已保存的编排' }
   }
 
   function clearSavedData() {
-    try {
-      localStorage.removeItem(STORAGE_KEY)
+    const result = clearScenesStorage()
+    if (result) {
       lastSavedAt.value = null
       return { ok: true }
-    } catch (e) {
-      return { ok: false, message: '清除失败' }
     }
+    return { ok: false, message: '清除失败' }
   }
 
   watch(

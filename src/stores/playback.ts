@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch, nextTick } from 'vue'
 import { Howl } from 'howler'
+import type { CuePoint, StagePosition } from '@/types'
 import { useSceneStore } from './scene'
 import { useTimelineStore } from './timeline'
 import { useResourceStore } from './resource'
-import type { CuePoint, StagePosition } from '@/types'
+import { getTimeProgress } from '@/utils/time'
+import { getResourceById, resolveSoundAudioUrl, describeCue } from '@/utils/resource-map'
 
 export interface CharacterOnStage {
   resourceId: string
@@ -45,11 +47,11 @@ export const usePlaybackStore = defineStore('playback', () => {
   const playbackSequence = computed(() => timelineStore.getPlaybackSequence())
 
   const progressPercent = computed(() =>
-    totalDuration.value > 0 ? (currentTime.value / totalDuration.value) * 100 : 0
+    getTimeProgress(currentTime.value, totalDuration.value)
   )
 
   const currentBackdrop = computed(() =>
-    currentBackdropId.value ? resourceStore.getResourceById(currentBackdropId.value) : null
+    currentBackdropId.value ? getResourceById(resourceStore.resources, currentBackdropId.value) : null
   )
 
   const stageCharacterList = computed(() => Array.from(stageCharacters.value.values()))
@@ -75,14 +77,6 @@ export const usePlaybackStore = defineStore('playback', () => {
   }
 
   function detectStageConflicts() {
-    const posMap = new Map<string, string[]>()
-    for (const ch of stageCharacters.value.values()) {
-      if (!posMap.has(ch.position)) {
-        posMap.set(ch.position, [])
-      }
-      posMap.get(ch.position)!.push(ch.resourceId)
-    }
-
     for (const ch of stageCharacters.value.values()) {
       if (timelineStore.isCueInConflict(ch.cueId)) {
         conflictPositions.value.set(ch.resourceId, true)
@@ -93,7 +87,7 @@ export const usePlaybackStore = defineStore('playback', () => {
   function applyCueToStage(cue: CuePoint, animate: boolean) {
     switch (cue.trackType) {
       case 'character': {
-        const res = resourceStore.getResourceById(cue.resourceId)
+        const res = getResourceById(resourceStore.resources, cue.resourceId)
         if (res) {
           stageCharacters.value.set(cue.resourceId, {
             resourceId: cue.resourceId,
@@ -113,20 +107,7 @@ export const usePlaybackStore = defineStore('playback', () => {
       }
       case 'lighting': {
         if (animate) {
-          const startBrightness = currentBrightness.value
-          const targetBrightness = cue.brightness
-          const duration = 500
-          const startTime = performance.now()
-          function animateBrightness(ts: number) {
-            const elapsed = ts - startTime
-            const progress = Math.min(1, elapsed / duration)
-            const eased = 1 - Math.pow(1 - progress, 3)
-            currentBrightness.value = Math.round(startBrightness + (targetBrightness - startBrightness) * eased)
-            if (progress < 1) {
-              requestAnimationFrame(animateBrightness)
-            }
-          }
-          requestAnimationFrame(animateBrightness)
+          animateBrightness(cue.brightness)
         } else {
           currentBrightness.value = cue.brightness
         }
@@ -145,6 +126,25 @@ export const usePlaybackStore = defineStore('playback', () => {
         break
       }
     }
+  }
+
+  function animateBrightness(targetBrightness: number) {
+    const startBrightness = currentBrightness.value
+    const duration = 500
+    const startTime = performance.now()
+
+    function step(ts: number) {
+      const elapsed = ts - startTime
+      const progress = Math.min(1, elapsed / duration)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      currentBrightness.value = Math.round(
+        startBrightness + (targetBrightness - startBrightness) * eased
+      )
+      if (progress < 1) {
+        requestAnimationFrame(step)
+      }
+    }
+    requestAnimationFrame(step)
   }
 
   function triggerDrumFlash() {
@@ -347,19 +347,8 @@ export const usePlaybackStore = defineStore('playback', () => {
         }
       }
 
-      const res = cue.resourceId ? resourceStore.getResourceById(cue.resourceId) : null
-      let audioUrl = res?.audioUrl
-
-      if (!audioUrl) {
-        const defaultSounds: Record<string, string> = {
-          '开场锣': 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3',
-          '急促鼓点': 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3',
-          '幕间钹': 'https://assets.mixkit.co/active_storage/sfx/2570/2570-preview.mp3',
-          '战鼓': 'https://assets.mixkit.co/active_storage/sfx/2567/2567-preview.mp3',
-          '收尾锣': 'https://assets.mixkit.co/active_storage/sfx/2569/2569-preview.mp3',
-        }
-        audioUrl = (res?.name && defaultSounds[res.name]) || 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'
-      }
+      const audioUrl = resolveSoundAudioUrl(resourceStore.resources, cue.resourceId)
+      const res = cue.resourceId ? getResourceById(resourceStore.resources, cue.resourceId) : null
 
       const howl = new Howl({
         src: [audioUrl],

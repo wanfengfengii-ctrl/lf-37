@@ -125,6 +125,15 @@ import { usePlaybackStore } from '@/stores/playback'
 import { useTimelineStore } from '@/stores/timeline'
 import { useResourceStore } from '@/stores/resource'
 import { useAnnotationStore } from '@/stores/annotation'
+import { useVersionStore } from '@/stores/version'
+import { useTeamStore } from '@/stores/team'
+import {
+  serializeExportPayload,
+  deserializeImportPayload,
+  downloadExportFile,
+  readJsonFile,
+} from '@/utils/storage'
+import { buildResourceNameMap, remapSceneResourceIds } from '@/utils/resource-map'
 import ValidationBadge from './ValidationBadge.vue'
 
 const sceneStore = useSceneStore()
@@ -132,6 +141,8 @@ const playbackStore = usePlaybackStore()
 const timelineStore = useTimelineStore()
 const resourceStore = useResourceStore()
 const annotationStore = useAnnotationStore()
+const versionStore = useVersionStore()
+const teamStore = useTeamStore()
 const message = useMessage()
 
 const durationValue = ref(sceneStore.currentScene?.duration ?? 120)
@@ -192,12 +203,13 @@ function togglePlay() {
 
 function onSave() {
   try {
-    const data = {
+    sceneStore.scheduleAutoSave()
+    versionStore.createSnapshot({
       scenes: sceneStore.scenes,
-      version: 1,
-    }
-    localStorage.setItem('shadow-puppet-stage', JSON.stringify(data))
-    annotationStore.createSnapshot()
+      annotations: annotationStore.annotations,
+      resources: resourceStore.resources,
+      isMilestone: false,
+    })
     message.success('已保存到本地，并自动生成版本快照')
   } catch (e) {
     message.error('保存失败')
@@ -209,87 +221,62 @@ function onExport() {
     const exportScenes = sceneStore.scenes.map(s => ({
       ...s,
       cues: s.cues.map(c => {
-        const res = c.resourceId ? resourceStore.getResourceById(c.resourceId) : null
+        const res = c.resourceId ? resourceStore.resources.find(r => r.id === c.resourceId) : null
         return { ...c, _resourceName: res?.name || '' }
       }),
     }))
-    const data = {
+    const content = serializeExportPayload({
       scenes: exportScenes,
-      version: 1,
-      exportedAt: new Date().toISOString(),
-    }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `皮影戏编排_${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+      annotations: annotationStore.annotations,
+      versions: versionStore.versionSnapshots,
+      teamMembers: teamStore.teamMembers,
+    })
+    const filename = `皮影戏编排_${new Date().toISOString().slice(0, 10)}.json`
+    downloadExportFile(filename, content)
     message.success('导出成功')
   } catch (e) {
     message.error('导出失败')
   }
 }
 
-function remapResourceIds(scenes: any[]) {
-  const allResources = resourceStore.resources
-  const nameTypeMap = new Map<string, string>()
-  for (const r of allResources) {
-    nameTypeMap.set(`${r.type}:${r.name}`, r.id)
-  }
-  for (const scene of scenes) {
-    for (const cue of scene.cues) {
-      if (cue.resourceId && !allResources.some(r => r.id === cue.resourceId)) {
-        const resName = cue._resourceName || ''
-        const trackToType: Record<string, string> = {
-          character: 'character',
-          sound: 'sound',
-          backdrop: 'backdrop',
-        }
-        const resType = trackToType[cue.trackType] || ''
-        const mappedId = nameTypeMap.get(`${resType}:${resName}`)
-        if (mappedId) {
-          cue.resourceId = mappedId
-        }
-      }
-    }
-  }
-}
-
-function onImport() {
+async function onImport() {
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = 'application/json'
-  input.onchange = (e) => {
+  input.onchange = async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result as string)
-        if (data.scenes && Array.isArray(data.scenes)) {
-          remapResourceIds(data.scenes)
-          const result = sceneStore.replaceAllScenes(data.scenes)
-          if (result.ok) {
-            timelineStore.selectCue(null)
-            playbackStore.reset()
-            nextTick(() => {
-              timelineStore.detectCharacterConflicts()
-              playbackStore.computeStageState()
-              playbackStore.triggerSequenceUpdate()
-            })
-            message.success(`导入成功，共 ${result.count} 个场次`)
-          } else {
-            message.error(result.message || '导入失败')
-          }
-        } else {
-          message.error('导入失败：文件格式错误')
-        }
-      } catch (err) {
+    try {
+      const raw = await readJsonFile(file)
+      const result = deserializeImportPayload(JSON.stringify(raw))
+      if (!result) {
         message.error('导入失败：文件格式错误')
+        return
       }
+      const scenes = result.scenes as Array<{ cues: Array<{ resourceId?: string; trackType: any; _resourceName?: string }> }>
+      remapSceneResourceIds(scenes, resourceStore.resources)
+      const replaceResult = sceneStore.replaceAllScenes(scenes as any[])
+      if (replaceResult.ok) {
+        if (result.annotations && Array.isArray(result.annotations)) {
+          annotationStore.replaceAllAnnotations(result.annotations as any[])
+        }
+        if (result.teamMembers && Array.isArray(result.teamMembers)) {
+          // 团队成员导入可选，暂不自动覆盖
+        }
+        timelineStore.selectCue(null)
+        playbackStore.reset()
+        nextTick(() => {
+          timelineStore.detectCharacterConflicts()
+          playbackStore.computeStageState()
+          playbackStore.triggerSequenceUpdate()
+        })
+        message.success(`导入成功，共 ${replaceResult.count} 个场次`)
+      } else {
+        message.error(replaceResult.message || '导入失败')
+      }
+    } catch (err) {
+      message.error('导入失败：文件格式错误')
     }
-    reader.readAsText(file)
   }
   input.click()
 }

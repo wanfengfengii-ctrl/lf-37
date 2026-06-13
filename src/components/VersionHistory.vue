@@ -104,7 +104,7 @@
     </div>
 
     <div class="version-list">
-      <div v-if="annotationStore.versionSnapshots.length === 0" class="empty-hint">
+      <div v-if="versionStore.versionSnapshots.length === 0" class="empty-hint">
         <n-text depth="3" style="font-size: 12px;">暂无版本快照，点击上方按钮创建</n-text>
       </div>
       <div
@@ -199,13 +199,19 @@ import {
   LockOutlined, FlagOutlined, EditOutlined, UnlockOutlined,
   DeleteOutlined, RollbackOutlined
 } from '@vicons/antd'
+import { useVersionStore } from '@/stores/version'
+import { useSceneStore } from '@/stores/scene'
 import { useAnnotationStore } from '@/stores/annotation'
+import { useResourceStore } from '@/stores/resource'
 import { usePlaybackStore } from '@/stores/playback'
 import { useTimelineStore } from '@/stores/timeline'
 import VersionDiff from './VersionDiff.vue'
 import type { VersionDiffItem, VersionSnapshot } from '@/types'
 
+const versionStore = useVersionStore()
+const sceneStore = useSceneStore()
 const annotationStore = useAnnotationStore()
+const resourceStore = useResourceStore()
 const playbackStore = usePlaybackStore()
 const timelineStore = useTimelineStore()
 const message = useMessage()
@@ -229,15 +235,9 @@ const editingSnapshot = reactive({
   description: '',
 })
 
-const sortedSnapshots = computed(() =>
-  [...annotationStore.versionSnapshots].sort((a, b) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  )
-)
+const sortedSnapshots = computed(() => versionStore.sortedSnapshots)
 
-const milestoneCount = computed(() =>
-  annotationStore.versionSnapshots.filter((v) => v.isMilestone).length
-)
+const milestoneCount = computed(() => versionStore.milestoneCount)
 
 function isLatest(snapshot: VersionSnapshot): boolean {
   const sorted = sortedSnapshots.value
@@ -277,7 +277,7 @@ function onSelect(id: string) {
 
 function onCompare() {
   if (selectedIds.value.length !== 2) return
-  diffResult.value = annotationStore.compareVersions(selectedIds.value[0], selectedIds.value[1])
+  diffResult.value = versionStore.compareVersions(selectedIds.value[0], selectedIds.value[1])
   showDiff.value = true
 }
 
@@ -288,7 +288,10 @@ function onCloseDiff() {
 
 function onCreateSnapshot() {
   if (!newSnapshot.label.trim()) return
-  const snapshot = annotationStore.createSnapshot({
+  const snapshot = versionStore.createSnapshot({
+    scenes: sceneStore.scenes,
+    annotations: annotationStore.annotations,
+    resources: resourceStore.resources,
     label: newSnapshot.label.trim(),
     description: newSnapshot.description.trim() || undefined,
     isMilestone: newSnapshot.isMilestone,
@@ -348,13 +351,13 @@ function onSnapshotAction(key: string, snapshot: VersionSnapshot) {
     editingSnapshot.description = snapshot.description || ''
     showEditDialog.value = true
   } else if (key === 'lock') {
-    annotationStore.toggleSnapshotLock(snapshot.id)
+    versionStore.toggleSnapshotLock(snapshot.id)
     message.success('版本已锁定，无法删除或修改')
   } else if (key === 'unlock') {
-    annotationStore.toggleSnapshotLock(snapshot.id)
+    versionStore.toggleSnapshotLock(snapshot.id)
     message.success('版本已解锁')
   } else if (key === 'milestone') {
-    annotationStore.toggleSnapshotMilestone(snapshot.id)
+    versionStore.toggleSnapshotMilestone(snapshot.id)
     message.success(snapshot.isMilestone ? '已取消里程碑标记' : '已标记为里程碑')
   } else if (key === 'restore') {
     dialog.warning({
@@ -363,14 +366,18 @@ function onSnapshotAction(key: string, snapshot: VersionSnapshot) {
       positiveText: '确定恢复',
       negativeText: '取消',
       onPositiveClick: () => {
-        const result = annotationStore.restoreSnapshot(snapshot.id)
-        if (result.ok) {
+        const result = versionStore.restoreSnapshot(snapshot.id)
+        if (result.ok && result.scenes && result.annotations) {
+          sceneStore.replaceAllScenes(result.scenes)
+          annotationStore.replaceAllAnnotations(result.annotations)
           selectedIds.value = []
           showDiff.value = false
           diffResult.value = []
           playbackStore.reset()
           timelineStore.selectCue(null)
-          const frozenCount = (result as { frozenIds?: string[] }).frozenIds?.length || 0
+          timelineStore.detectCharacterConflicts()
+          playbackStore.computeStageState()
+          const frozenCount = result.frozenIds?.length || 0
           message.success(`版本已恢复${frozenCount > 0 ? `，同步恢复 ${frozenCount} 条批注状态` : ''}`)
         } else {
           message.error(result.message || '恢复失败')
@@ -384,7 +391,7 @@ function onSnapshotAction(key: string, snapshot: VersionSnapshot) {
       positiveText: '确定删除',
       negativeText: '取消',
       onPositiveClick: () => {
-        annotationStore.deleteSnapshot(snapshot.id)
+        versionStore.deleteSnapshot(snapshot.id)
         selectedIds.value = selectedIds.value.filter((sid) => sid !== snapshot.id)
         if (selectedIds.value.length < 2) {
           showDiff.value = false
@@ -398,7 +405,7 @@ function onSnapshotAction(key: string, snapshot: VersionSnapshot) {
 
 function onSaveEdit() {
   if (!editingSnapshot.label.trim()) return
-  annotationStore.updateSnapshot(editingSnapshot.id, {
+  versionStore.updateSnapshot(editingSnapshot.id, {
     label: editingSnapshot.label.trim(),
     description: editingSnapshot.description.trim() || undefined,
   })
