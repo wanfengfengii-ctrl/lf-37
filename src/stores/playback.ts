@@ -33,6 +33,9 @@ export const usePlaybackStore = defineStore('playback', () => {
   const currentNarration = ref<string>('')
   const narrationVisible = ref<boolean>(false)
   const narrationTimer = ref<number | null>(null)
+  const narrationDuration = ref<number>(5000)
+  const narrationRemaining = ref<number>(0)
+  const narrationStartTs = ref<number>(0)
   const drumFlash = ref<boolean>(false)
   const conflictPositions = ref<Map<string, boolean>>(new Map())
   let drumFlashTimer: number | null = null
@@ -157,7 +160,11 @@ export const usePlaybackStore = defineStore('playback', () => {
   watch(
     () => sceneStore.currentSceneId,
     () => {
-      computeStageState()
+      reset()
+      nextTick(() => {
+        computeStageState()
+        triggerSequenceUpdate()
+      })
     }
   )
 
@@ -187,6 +194,8 @@ export const usePlaybackStore = defineStore('playback', () => {
     }
     isPlaying.value = true
     lastTimestamp = performance.now()
+    resumeNarrationTimer()
+    resumeAllSounds()
     tick(lastTimestamp)
   }
 
@@ -195,6 +204,28 @@ export const usePlaybackStore = defineStore('playback', () => {
     if (rafId !== null) {
       cancelAnimationFrame(rafId)
       rafId = null
+    }
+    pauseNarrationTimer()
+    pauseAllSounds()
+  }
+
+  function pauseAllSounds() {
+    for (const howl of soundInstances.value.values()) {
+      try {
+        if (howl.playing()) {
+          howl.pause()
+        }
+      } catch {}
+    }
+  }
+
+  function resumeAllSounds() {
+    for (const howl of soundInstances.value.values()) {
+      try {
+        if (!howl.playing()) {
+          howl.play()
+        }
+      } catch {}
     }
   }
 
@@ -208,7 +239,13 @@ export const usePlaybackStore = defineStore('playback', () => {
     currentBrightness.value = 100
     currentNarration.value = ''
     narrationVisible.value = false
+    narrationRemaining.value = 0
+    if (narrationTimer.value !== null) {
+      window.clearTimeout(narrationTimer.value)
+      narrationTimer.value = null
+    }
     drumFlash.value = false
+    conflictPositions.value.clear()
   }
 
   function seek(time: number) {
@@ -240,6 +277,11 @@ export const usePlaybackStore = defineStore('playback', () => {
 
     if (currentTime.value >= totalDuration.value) {
       pause()
+      currentTime.value = totalDuration.value
+      computeStageState()
+      window.setTimeout(() => {
+        seek(0)
+      }, 800)
       return
     }
     rafId = requestAnimationFrame(tick)
@@ -255,16 +297,44 @@ export const usePlaybackStore = defineStore('playback', () => {
     }
   }
 
-  function showNarration(text: string) {
+  function showNarration(text: string, duration: number = 5000) {
     if (!text) return
     currentNarration.value = text
     narrationVisible.value = true
+    narrationDuration.value = duration
+    narrationRemaining.value = duration
+    narrationStartTs.value = performance.now()
     if (narrationTimer.value !== null) {
       window.clearTimeout(narrationTimer.value)
     }
+    startNarrationTimer(duration)
+  }
+
+  function startNarrationTimer(remaining: number) {
+    if (narrationTimer.value !== null) {
+      window.clearTimeout(narrationTimer.value)
+    }
+    narrationStartTs.value = performance.now()
+    narrationRemaining.value = remaining
     narrationTimer.value = window.setTimeout(() => {
       narrationVisible.value = false
-    }, 5000)
+      narrationRemaining.value = 0
+    }, remaining)
+  }
+
+  function pauseNarrationTimer() {
+    if (narrationTimer.value !== null && narrationVisible.value) {
+      window.clearTimeout(narrationTimer.value)
+      narrationTimer.value = null
+      const elapsed = performance.now() - narrationStartTs.value
+      narrationRemaining.value = Math.max(0, narrationRemaining.value - elapsed)
+    }
+  }
+
+  function resumeNarrationTimer() {
+    if (narrationVisible.value && narrationRemaining.value > 0) {
+      startNarrationTimer(narrationRemaining.value)
+    }
   }
 
   function playSound(cue: CuePoint) {
