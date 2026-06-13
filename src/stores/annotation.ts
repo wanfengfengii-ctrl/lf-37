@@ -6,16 +6,31 @@ import type {
   Annotation,
   AnnotationType,
   AnnotationStatus,
+  AnnotationPriority,
+  RiskLevel,
+  TeamMember,
   VersionSnapshot,
   VersionDiffItem,
   CuePoint,
   TrackType,
+  AnnotationFilter,
+  AnnotationStats,
+  PlaybackFilter,
 } from '@/types'
 import { TRACK_LABELS, POSITION_LABELS } from '@/types'
 
 const genId = () => Math.random().toString(36).slice(2, 10)
 const ANNOTATION_KEY = 'shadow-puppet-annotations'
 const VERSION_KEY = 'shadow-puppet-versions'
+const MEMBERS_KEY = 'shadow-puppet-members'
+
+const DEFAULT_MEMBERS: TeamMember[] = [
+  { id: 'm1', name: '张导演', role: '导演', avatar: '🎬', color: '#E6A23C' },
+  { id: 'm2', name: '李演员', role: '主演', avatar: '🎭', color: '#409EFF' },
+  { id: 'm3', name: '王灯光', role: '灯光师', avatar: '💡', color: '#F56C6C' },
+  { id: 'm4', name: '赵音效', role: '音效师', avatar: '🎵', color: '#67C23A' },
+  { id: 'm5', name: '陈道具', role: '道具师', avatar: '🎪', color: '#909399' },
+]
 
 function loadAnnotations(): Annotation[] {
   try {
@@ -45,16 +60,51 @@ function saveVersions(versions: VersionSnapshot[]) {
   } catch {}
 }
 
+function loadMembers(): TeamMember[] {
+  try {
+    const raw = localStorage.getItem(MEMBERS_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return DEFAULT_MEMBERS
+}
+
+function saveMembers(members: TeamMember[]) {
+  try {
+    localStorage.setItem(MEMBERS_KEY, JSON.stringify(members))
+  } catch {}
+}
+
+function isOverdue(deadline?: string): boolean {
+  if (!deadline) return false
+  return new Date(deadline) < new Date()
+}
+
 export const useAnnotationStore = defineStore('annotation', () => {
   const sceneStore = useSceneStore()
   const resourceStore = useResourceStore()
 
   const annotations = ref<Annotation[]>(loadAnnotations())
   const versionSnapshots = ref<VersionSnapshot[]>(loadVersions())
+  const teamMembers = ref<TeamMember[]>(loadMembers())
 
   const showVersionPanel = ref(false)
   const showAnnotationPanel = ref(true)
   const compareVersionIds = ref<[string, string] | null>(null)
+
+  const currentFilter = ref<AnnotationFilter>({
+    type: 'all',
+    status: 'all',
+    priority: 'all',
+    assigneeId: 'all',
+    riskLevel: 'all',
+    keyword: '',
+  })
+
+  const playbackFilter = ref<PlaybackFilter>({
+    assigneeId: 'all',
+    riskLevel: 'all',
+    showResolved: false,
+  })
 
   function persistAnnotations() {
     saveAnnotations(annotations.value)
@@ -62,6 +112,10 @@ export const useAnnotationStore = defineStore('annotation', () => {
 
   function persistVersions() {
     saveVersions(versionSnapshots.value)
+  }
+
+  function persistMembers() {
+    saveMembers(teamMembers.value)
   }
 
   const sceneAnnotations = computed(() => {
@@ -83,6 +137,87 @@ export const useAnnotationStore = defineStore('annotation', () => {
     annotations.value.filter((a) => a.status !== 'resolved').length
   )
 
+  const overdueCount = computed(() =>
+    annotations.value.filter((a) => a.status !== 'resolved' && isOverdue(a.deadline)).length
+  )
+
+  const filteredAnnotations = computed(() => {
+    let list = [...sceneAnnotations.value]
+    const filter = currentFilter.value
+
+    if (filter.type && filter.type !== 'all') {
+      list = list.filter((a) => a.type === filter.type)
+    }
+    if (filter.status && filter.status !== 'all') {
+      list = list.filter((a) => a.status === filter.status)
+    }
+    if (filter.priority && filter.priority !== 'all') {
+      list = list.filter((a) => a.priority === filter.priority)
+    }
+    if (filter.assigneeId && filter.assigneeId !== 'all') {
+      list = list.filter((a) => a.assigneeId === filter.assigneeId)
+    }
+    if (filter.riskLevel && filter.riskLevel !== 'all') {
+      list = list.filter((a) => a.riskLevel === filter.riskLevel)
+    }
+    if (filter.keyword) {
+      const keyword = filter.keyword.toLowerCase()
+      list = list.filter((a) => a.content.toLowerCase().includes(keyword))
+    }
+
+    return list.sort((a, b) => {
+      const priorityOrder: Record<AnnotationPriority, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+      if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
+        return priorityOrder[a.priority] - priorityOrder[b.priority]
+      }
+      if (a.type === 'risk' && b.type !== 'risk') return -1
+      if (a.type !== 'risk' && b.type === 'risk') return 1
+      if (a.status === 'resolved' && b.status !== 'resolved') return 1
+      if (a.status !== 'resolved' && b.status === 'resolved') return -1
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    })
+  })
+
+  const annotationStats = computed<AnnotationStats>(() => {
+    const list = sceneAnnotations.value
+    const stats: AnnotationStats = {
+      total: list.length,
+      pending: 0,
+      inProgress: 0,
+      resolved: 0,
+      byPriority: { low: 0, medium: 0, high: 0, critical: 0 },
+      byType: { director: 0, actor: 0, risk: 0 },
+      byAssignee: {},
+      overdue: 0,
+      byRiskLevel: { low: 0, medium: 0, high: 0, critical: 0 },
+    }
+
+    for (const a of list) {
+      if (a.status === 'in_progress') {
+        stats.inProgress++
+      } else {
+        stats[a.status]++
+      }
+      stats.byPriority[a.priority]++
+      stats.byType[a.type]++
+      if (a.assigneeId) {
+        stats.byAssignee[a.assigneeId] = (stats.byAssignee[a.assigneeId] || 0) + 1
+      }
+      if (a.status !== 'resolved' && isOverdue(a.deadline)) {
+        stats.overdue++
+      }
+      if (a.riskLevel) {
+        stats.byRiskLevel[a.riskLevel]++
+      }
+    }
+
+    return stats
+  })
+
+  function getMemberById(id: string): TeamMember | undefined {
+    return teamMembers.value.find((m) => m.id === id)
+  }
+
   function getAnnotationsForTime(time: number): Annotation[] {
     const sceneId = sceneStore.currentSceneId
     const scene = sceneStore.currentScene
@@ -100,8 +235,19 @@ export const useAnnotationStore = defineStore('annotation', () => {
     )
   }
 
+  function getFilteredAnnotationsForTime(time: number): Annotation[] {
+    const anns = getAnnotationsForTime(time)
+    const filter = playbackFilter.value
+    return anns.filter((a) => {
+      if (!filter.showResolved && a.status === 'resolved') return false
+      if (filter.assigneeId && filter.assigneeId !== 'all' && a.assigneeId !== filter.assigneeId) return false
+      if (filter.riskLevel && filter.riskLevel !== 'all' && a.riskLevel !== filter.riskLevel) return false
+      return true
+    })
+  }
+
   function getRiskAnnotationsForTime(time: number): Annotation[] {
-    return getAnnotationsForTime(time).filter(
+    return getFilteredAnnotationsForTime(time).filter(
       (a) => a.type === 'risk' && a.status !== 'resolved'
     )
   }
@@ -111,6 +257,10 @@ export const useAnnotationStore = defineStore('annotation', () => {
     cueId?: string
     type: AnnotationType
     content: string
+    priority?: AnnotationPriority
+    riskLevel?: RiskLevel
+    assigneeId?: string
+    deadline?: string
   }) {
     const now = new Date().toISOString()
     const annotation: Annotation = {
@@ -120,12 +270,24 @@ export const useAnnotationStore = defineStore('annotation', () => {
       type: partial.type,
       content: partial.content,
       status: 'pending',
+      priority: partial.priority || 'medium',
+      riskLevel: partial.riskLevel,
+      assigneeId: partial.assigneeId,
+      deadline: partial.deadline,
       createdAt: now,
       updatedAt: now,
+      createdBy: 'current_user',
     }
     annotations.value.push(annotation)
     persistAnnotations()
     return annotation
+  }
+
+  function updateAnnotation(id: string, patch: Partial<Annotation>) {
+    const ann = annotations.value.find((a) => a.id === id)
+    if (!ann) return
+    Object.assign(ann, patch, { updatedAt: new Date().toISOString() })
+    persistAnnotations()
   }
 
   function updateAnnotationStatus(id: string, status: AnnotationStatus) {
@@ -152,7 +314,11 @@ export const useAnnotationStore = defineStore('annotation', () => {
     persistAnnotations()
   }
 
-  function createSnapshot(label?: string) {
+  function createSnapshot(partial?: {
+    label?: string
+    description?: string
+    isMilestone?: boolean
+  }) {
     const now = new Date().toISOString()
     const ts = new Date().toLocaleString('zh-CN', {
       month: '2-digit',
@@ -164,20 +330,56 @@ export const useAnnotationStore = defineStore('annotation', () => {
     for (const r of resourceStore.resources) {
       resourceNames[r.id] = r.name
     }
+
+    const frozenAnnotationIds = annotations.value
+      .filter((a) => a.status !== 'resolved')
+      .map((a) => a.id)
+
     const snapshot: VersionSnapshot = {
       id: genId(),
-      label: label || `版本 ${versionSnapshots.value.length + 1} - ${ts}`,
+      label: partial?.label || `版本 ${versionSnapshots.value.length + 1} - ${ts}`,
+      description: partial?.description || '',
       scenes: JSON.parse(JSON.stringify(sceneStore.scenes)),
       annotations: JSON.parse(JSON.stringify(annotations.value)),
       resourceNames,
       createdAt: now,
+      createdBy: 'current_user',
+      isLocked: false,
+      isMilestone: partial?.isMilestone || false,
+      frozenAnnotationIds,
     }
     versionSnapshots.value.push(snapshot)
     persistVersions()
     return snapshot
   }
 
+  function updateSnapshot(id: string, patch: Partial<VersionSnapshot>) {
+    const snapshot = versionSnapshots.value.find((v) => v.id === id)
+    if (!snapshot) return
+    if (snapshot.isLocked && (patch.isLocked !== undefined || patch.isMilestone !== undefined)) {
+      return
+    }
+    Object.assign(snapshot, patch)
+    persistVersions()
+  }
+
+  function toggleSnapshotLock(id: string) {
+    const snapshot = versionSnapshots.value.find((v) => v.id === id)
+    if (!snapshot) return
+    snapshot.isLocked = !snapshot.isLocked
+    persistVersions()
+  }
+
+  function toggleSnapshotMilestone(id: string) {
+    const snapshot = versionSnapshots.value.find((v) => v.id === id)
+    if (!snapshot) return
+    snapshot.isMilestone = !snapshot.isMilestone
+    persistVersions()
+  }
+
   function deleteSnapshot(id: string) {
+    const snapshot = versionSnapshots.value.find((v) => v.id === id)
+    if (snapshot?.isLocked) return
     const idx = versionSnapshots.value.findIndex((v) => v.id === id)
     if (idx > -1) {
       versionSnapshots.value.splice(idx, 1)
@@ -194,7 +396,7 @@ export const useAnnotationStore = defineStore('annotation', () => {
     if (result.ok) {
       annotations.value = JSON.parse(JSON.stringify(snapshot.annotations))
       persistAnnotations()
-      return { ok: true }
+      return { ok: true, frozenIds: snapshot.frozenAnnotationIds }
     }
     return result
   }
@@ -370,25 +572,38 @@ export const useAnnotationStore = defineStore('annotation', () => {
   return {
     annotations,
     versionSnapshots,
+    teamMembers,
     showVersionPanel,
     showAnnotationPanel,
     compareVersionIds,
+    currentFilter,
+    playbackFilter,
     sceneAnnotations,
     cueAnnotations,
     pendingRiskCount,
     unresolvedCount,
+    overdueCount,
+    filteredAnnotations,
+    annotationStats,
+    getMemberById,
     getAnnotationsForTime,
+    getFilteredAnnotationsForTime,
     getRiskAnnotationsForTime,
     addAnnotation,
+    updateAnnotation,
     updateAnnotationStatus,
     removeAnnotation,
     updateAnnotationContent,
     createSnapshot,
+    updateSnapshot,
+    toggleSnapshotLock,
+    toggleSnapshotMilestone,
     deleteSnapshot,
     restoreSnapshot,
     compareVersions,
     clearCompare,
     startCompare,
     persistAnnotations,
+    persistMembers,
   }
 })

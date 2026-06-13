@@ -27,7 +27,43 @@
           <n-tag v-if="currentRiskAnnotations.length > 0" size="tiny" round :bordered="false" type="error" class="risk-alert-tag">
             ⚠️ {{ currentRiskAnnotations.length }} 条风险
           </n-tag>
+          <n-dropdown trigger="click" :options="playbackFilterOptions" @select="onPlaybackFilterSelect">
+            <n-button text size="tiny" class="filter-btn" title="批注筛选">
+              <n-icon size="14" :color="'#F5F0EB'"><component :is="FilterOutlined" /></n-icon>
+            </n-button>
+          </n-dropdown>
         </n-space>
+      </n-space>
+    </div>
+
+    <div v-if="showPlaybackFilter" class="playback-filter-bar">
+      <n-space align="center" size="small" wrap>
+        <n-text style="color: #F5F0EB; font-size: 12px;">批注筛选：</n-text>
+        <n-select
+          v-model:value="annotationStore.playbackFilter.assigneeId"
+          :options="assigneeFilterOptions"
+          size="tiny"
+          style="width: 110px;"
+          clearable
+        />
+        <n-select
+          v-model:value="annotationStore.playbackFilter.riskLevel"
+          :options="riskLevelFilterOptions"
+          size="tiny"
+          style="width: 100px;"
+          clearable
+        />
+        <n-switch
+          v-model:value="annotationStore.playbackFilter.showResolved"
+          size="small"
+          round
+        >
+          <template #checked>显示已解决</template>
+          <template #unchecked>仅未解决</template>
+        </n-switch>
+        <n-button text size="tiny" @click="resetPlaybackFilter" style="color: #F5F0EB;">
+          重置
+        </n-button>
       </n-space>
     </div>
 
@@ -195,15 +231,83 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { PlayCircleOutlined } from '@vicons/antd'
-import { NIcon, NSpace, NTag, NText } from 'naive-ui'
+import { ref, computed } from 'vue'
+import { PlayCircleOutlined, FilterOutlined } from '@vicons/antd'
+import {
+  NIcon, NSpace, NTag, NText, NDropdown, NSelect, NSwitch,
+  NButton, useMessage
+} from 'naive-ui'
 import { usePlaybackStore, type CharacterOnStage } from '@/stores/playback'
 import { useAnnotationStore } from '@/stores/annotation'
-import type { StagePosition } from '@/types'
+import type { StagePosition, RiskLevel } from '@/types'
 
 const playbackStore = usePlaybackStore()
 const annotationStore = useAnnotationStore()
+const message = useMessage()
+
+const showPlaybackFilter = ref(false)
+
+const playbackFilterOptions = [
+  { label: '显示筛选面板', key: 'toggle' },
+  { type: 'divider' as const, key: 'd1' },
+  { label: '仅显示指派给我的', key: 'only_me' },
+  { label: '仅显示高风险', key: 'high_risk' },
+  { label: '仅显示紧急', key: 'critical' },
+  { type: 'divider' as const, key: 'd2' },
+  { label: '显示全部批注', key: 'all' },
+]
+
+const assigneeFilterOptions = computed(() => [
+  { label: '全部成员', value: 'all' },
+  ...annotationStore.teamMembers.map((m) => ({
+    label: `${m.avatar} ${m.name}`,
+    value: m.id,
+  })),
+])
+
+const riskLevelFilterOptions = [
+  { label: '全部风险', value: 'all' },
+  { label: '致命', value: 'critical' },
+  { label: '高危', value: 'high' },
+  { label: '中危', value: 'medium' },
+  { label: '低危', value: 'low' },
+]
+
+function onPlaybackFilterSelect(key: string) {
+  switch (key) {
+    case 'toggle':
+      showPlaybackFilter.value = !showPlaybackFilter.value
+      break
+    case 'only_me':
+      annotationStore.playbackFilter.assigneeId = 'm1'
+      annotationStore.playbackFilter.riskLevel = 'all'
+      annotationStore.playbackFilter.showResolved = false
+      message.info('仅显示指派给张导演的批注')
+      break
+    case 'high_risk':
+      annotationStore.playbackFilter.riskLevel = 'high'
+      annotationStore.playbackFilter.assigneeId = 'all'
+      annotationStore.playbackFilter.showResolved = false
+      message.info('仅显示高风险及以上批注')
+      break
+    case 'critical':
+      annotationStore.playbackFilter.riskLevel = 'critical'
+      annotationStore.playbackFilter.assigneeId = 'all'
+      annotationStore.playbackFilter.showResolved = false
+      message.info('仅显示致命风险批注')
+      break
+    case 'all':
+      resetPlaybackFilter()
+      message.info('已显示全部批注')
+      break
+  }
+}
+
+function resetPlaybackFilter() {
+  annotationStore.playbackFilter.assigneeId = 'all'
+  annotationStore.playbackFilter.riskLevel = 'all'
+  annotationStore.playbackFilter.showResolved = false
+}
 
 const stageStyle = computed(() => ({
   background: playbackStore.currentBackdrop ? '#3d2817' : '#2a1a0f',
@@ -247,7 +351,7 @@ const charactersByPosition = computed<Record<StagePosition, CharacterOnStage[]>>
 })
 
 const playbackAnnotations = computed(() =>
-  annotationStore.getAnnotationsForTime(playbackStore.currentTime)
+  annotationStore.getFilteredAnnotationsForTime(playbackStore.currentTime)
 )
 
 const currentRiskAnnotations = computed(() =>
@@ -275,6 +379,37 @@ const currentRiskAnnotations = computed(() =>
   background: rgba(0, 0, 0, 0.3);
   border-bottom: 1px solid rgba(192, 57, 43, 0.3);
   flex-shrink: 0;
+}
+
+.filter-btn {
+  color: #F5F0EB;
+  border: 1px solid rgba(245, 240, 235, 0.3);
+  border-radius: 4px;
+  padding: 2px 6px;
+  transition: all 0.2s ease;
+}
+
+.filter-btn:hover {
+  background: rgba(245, 240, 235, 0.1);
+}
+
+.playback-filter-bar {
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.4);
+  border-bottom: 1px solid rgba(192, 57, 43, 0.2);
+  flex-shrink: 0;
+  animation: filterBarSlide 0.3s ease-out;
+}
+
+@keyframes filterBarSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .rehearsal-tag {
