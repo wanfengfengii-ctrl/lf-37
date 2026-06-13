@@ -115,6 +115,34 @@ export const useSceneStore = defineStore('scene', () => {
     validationErrors.value = errors
   }
 
+  function replaceAllScenes(newScenes: Scene[]) {
+    if (!newScenes || newScenes.length === 0) return { ok: false, message: '导入数据为空' }
+    const idMap = new Map<string, string>()
+    const imported: Scene[] = newScenes.map((s) => {
+      const newId = genId()
+      idMap.set(s.id, newId)
+      return {
+        ...s,
+        id: newId,
+        cues: s.cues.map((c) => ({
+          ...c,
+          id: genId(),
+          sceneId: newId,
+        })),
+      }
+    })
+    const seenNumbers = new Set<string>()
+    for (const s of imported) {
+      if (seenNumbers.has(s.sceneNumber)) {
+        return { ok: false, message: `导入数据中场次编号 "${s.sceneNumber}" 重复（R1）` }
+      }
+      seenNumbers.add(s.sceneNumber)
+    }
+    scenes.value.splice(0, scenes.value.length, ...imported)
+    currentSceneId.value = imported[0].id
+    return { ok: true, count: imported.length }
+  }
+
   return {
     scenes,
     currentSceneId,
@@ -130,5 +158,6 @@ export const useSceneStore = defineStore('scene', () => {
     canMarkPerformable,
     setPerformable,
     setErrors,
+    replaceAllScenes,
   }
 })

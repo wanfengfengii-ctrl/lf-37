@@ -1,5 +1,5 @@
 import type { Scene, CuePoint, ValidationError, TrackType } from '@/types'
-import { TRACK_ORDER } from '@/types'
+import { TRACK_ORDER, POSITION_LABELS } from '@/types'
 
 export interface ValidationResult {
   valid: boolean
@@ -29,17 +29,17 @@ export function validateCharacterConflict(cues: CuePoint[]): ValidationError[] {
     for (let j = i + 1; j < charCues.length; j++) {
       const a = charCues[i]
       const b = charCues[j]
-      if (a.resourceId && a.resourceId === b.resourceId && a.position === b.position) {
+      if (a.resourceId && a.resourceId === b.resourceId && a.position !== b.position) {
         const timeDiff = Math.abs(a.time - b.time)
         if (timeDiff < 3) {
           errors.push({
             rule: 'R2',
-            message: `角色在 ${a.time.toFixed(1)}s 和 ${b.time.toFixed(1)}s 于同一幕位冲突（间隔 <3s）`,
+            message: `角色在 ${a.time.toFixed(1)}s (${POSITION_LABELS[a.position]}) 和 ${b.time.toFixed(1)}s (${POSITION_LABELS[b.position]}) 冲突（同一角色不能同时在两个幕位，间隔 <3s）`,
             cueId: a.id,
           })
           errors.push({
             rule: 'R2',
-            message: `角色在 ${b.time.toFixed(1)}s 和 ${a.time.toFixed(1)}s 于同一幕位冲突（间隔 <3s）`,
+            message: `角色在 ${b.time.toFixed(1)}s (${POSITION_LABELS[b.position]}) 和 ${a.time.toFixed(1)}s (${POSITION_LABELS[a.position]}) 冲突（同一角色不能同时在两个幕位，间隔 <3s）`,
             cueId: b.id,
           })
         }

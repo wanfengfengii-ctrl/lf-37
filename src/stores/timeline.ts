@@ -112,7 +112,7 @@ export const useTimelineStore = defineStore('timeline', () => {
       for (let j = i + 1; j < charCues.length; j++) {
         const a = charCues[i]
         const b = charCues[j]
-        if (a.resourceId && a.resourceId === b.resourceId && a.position === b.position) {
+        if (a.resourceId && a.resourceId === b.resourceId && a.position !== b.position) {
           const timeDiff = Math.abs(a.time - b.time)
           if (timeDiff < 3) {
             conflicts.add(a.id)

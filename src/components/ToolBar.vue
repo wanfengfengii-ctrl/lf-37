@@ -90,10 +90,12 @@ import {
 } from '@vicons/antd'
 import { useSceneStore } from '@/stores/scene'
 import { usePlaybackStore } from '@/stores/playback'
+import { useTimelineStore } from '@/stores/timeline'
 import ValidationBadge from './ValidationBadge.vue'
 
 const sceneStore = useSceneStore()
 const playbackStore = usePlaybackStore()
+const timelineStore = useTimelineStore()
 const message = useMessage()
 
 const durationValue = ref(sceneStore.currentScene?.duration ?? 120)
@@ -181,12 +183,17 @@ function onImport() {
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result as string)
-        if (data.scenes) {
-          ;(sceneStore as any).scenes = data.scenes
-          if (data.scenes.length > 0) {
-            sceneStore.setCurrentScene(data.scenes[0].id)
+        if (data.scenes && Array.isArray(data.scenes)) {
+          const result = sceneStore.replaceAllScenes(data.scenes)
+          if (result.ok) {
+            timelineStore.selectCue(null)
+            playbackStore.reset()
+            message.success(`导入成功，共 ${result.count} 个场次`)
+          } else {
+            message.error(result.message || '导入失败')
           }
-          message.success('导入成功')
+        } else {
+          message.error('导入失败：文件格式错误')
         }
       } catch (err) {
         message.error('导入失败：文件格式错误')
