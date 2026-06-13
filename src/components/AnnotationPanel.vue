@@ -69,15 +69,34 @@
               Cue
             </n-tag>
           </n-space>
-          <n-dropdown :options="actionOptions" @select="(key: string) => onAction(key, ann)">
-            <n-button text size="tiny">
-              <n-icon size="14"><component :is="MoreOutlined" /></n-icon>
+          <n-space align="center" size="tiny">
+            <n-button text size="tiny" @click="startEdit(ann)" title="编辑">
+              <n-icon size="13" :color="'#909399'"><component :is="EditOutlined" /></n-icon>
             </n-button>
-          </n-dropdown>
+            <n-dropdown :options="actionOptions" @select="(key: string) => onAction(key, ann)">
+              <n-button text size="tiny">
+                <n-icon size="14"><component :is="MoreOutlined" /></n-icon>
+              </n-button>
+            </n-dropdown>
+          </n-space>
         </div>
-        <div class="ann-content">{{ ann.content }}</div>
+        <div v-if="editingId === ann.id" class="ann-edit-area">
+          <n-input
+            v-model:value="editingContent"
+            type="textarea"
+            :rows="2"
+            size="small"
+            autofocus
+          />
+          <n-space justify="end" size="small" style="margin-top: 6px;">
+            <n-button size="tiny" @click="editingId = null">取消</n-button>
+            <n-button size="tiny" type="primary" :disabled="!editingContent.trim()" @click="onSaveEdit(ann.id)">保存</n-button>
+          </n-space>
+        </div>
+        <div v-else class="ann-content" @dblclick="startEdit(ann)">{{ ann.content }}</div>
         <div class="ann-time">
           {{ formatTime(ann.createdAt) }}
+          <span v-if="ann.createdAt !== ann.updatedAt" class="ann-edited">（已编辑）</span>
         </div>
       </div>
     </div>
@@ -87,7 +106,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue'
 import { NButton, NDropdown, NIcon, NInput, NSelect, NSpace, NTag, NText } from 'naive-ui'
-import { CommentOutlined, PlusOutlined, MoreOutlined } from '@vicons/antd'
+import { CommentOutlined, PlusOutlined, MoreOutlined, EditOutlined } from '@vicons/antd'
 import { useAnnotationStore } from '@/stores/annotation'
 import { useSceneStore } from '@/stores/scene'
 import { useTimelineStore } from '@/stores/timeline'
@@ -98,6 +117,8 @@ const sceneStore = useSceneStore()
 const timelineStore = useTimelineStore()
 
 const showAddForm = ref(false)
+const editingId = ref<string | null>(null)
+const editingContent = ref('')
 const newAnnotation = reactive<{ type: AnnotationType; content: string }>({
   type: 'director',
   content: '',
@@ -181,8 +202,23 @@ function onAddAnnotation() {
   showAddForm.value = false
 }
 
+function startEdit(ann: Annotation) {
+  editingId.value = ann.id
+  editingContent.value = ann.content
+}
+
+function onSaveEdit(id: string) {
+  if (!editingContent.value.trim()) return
+  annotationStore.updateAnnotationContent(id, editingContent.value.trim())
+  editingId.value = null
+  editingContent.value = ''
+}
+
 function onAction(key: string, ann: Annotation) {
   switch (key) {
+    case 'edit':
+      startEdit(ann)
+      break
     case 'in_progress':
       annotationStore.updateAnnotationStatus(ann.id, 'in_progress')
       break
@@ -199,6 +235,7 @@ function onAction(key: string, ann: Annotation) {
 }
 
 const actionOptions = computed(() => [
+  { label: '编辑内容', key: 'edit' },
   { label: '标记处理中', key: 'in_progress' },
   { label: '标记已解决', key: 'resolved' },
   { label: '重置为待处理', key: 'pending' },
@@ -285,6 +322,25 @@ const actionOptions = computed(() => [
   line-height: 1.5;
   color: #303133;
   word-break: break-all;
+  cursor: text;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  transition: background 0.15s ease;
+}
+
+.ann-content:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.ann-edit-area {
+  margin-top: 4px;
+}
+
+.ann-edited {
+  font-size: 10px;
+  color: #C0C4CC;
+  margin-left: 4px;
 }
 
 .ann-time {

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useSceneStore } from './scene'
+import { useResourceStore } from './resource'
 import type {
   Annotation,
   AnnotationType,
@@ -46,6 +47,7 @@ function saveVersions(versions: VersionSnapshot[]) {
 
 export const useAnnotationStore = defineStore('annotation', () => {
   const sceneStore = useSceneStore()
+  const resourceStore = useResourceStore()
 
   const annotations = ref<Annotation[]>(loadAnnotations())
   const versionSnapshots = ref<VersionSnapshot[]>(loadVersions())
@@ -158,11 +160,16 @@ export const useAnnotationStore = defineStore('annotation', () => {
       hour: '2-digit',
       minute: '2-digit',
     })
+    const resourceNames: Record<string, string> = {}
+    for (const r of resourceStore.resources) {
+      resourceNames[r.id] = r.name
+    }
     const snapshot: VersionSnapshot = {
       id: genId(),
       label: label || `版本 ${versionSnapshots.value.length + 1} - ${ts}`,
       scenes: JSON.parse(JSON.stringify(sceneStore.scenes)),
       annotations: JSON.parse(JSON.stringify(annotations.value)),
+      resourceNames,
       createdAt: now,
     }
     versionSnapshots.value.push(snapshot)
@@ -238,7 +245,7 @@ export const useAnnotationStore = defineStore('annotation', () => {
         })
       }
 
-      compareCues(sA!.cues, sB!.cues, sceneLabel, diffs)
+      compareCues(sA!.cues, sB!.cues, sceneLabel, diffs, vA.resourceNames, vB.resourceNames)
     }
 
     compareAnnotations(vA.annotations, vB.annotations, diffs)
@@ -250,7 +257,9 @@ export const useAnnotationStore = defineStore('annotation', () => {
     cuesA: CuePoint[],
     cuesB: CuePoint[],
     sceneLabel: string,
-    diffs: VersionDiffItem[]
+    diffs: VersionDiffItem[],
+    namesA: Record<string, string>,
+    namesB: Record<string, string>
   ) {
     const mapA = new Map(cuesA.map((c) => [c.id, c]))
     const mapB = new Map(cuesB.map((c) => [c.id, c]))
@@ -260,7 +269,7 @@ export const useAnnotationStore = defineStore('annotation', () => {
         diffs.push({
           trackType: cB.trackType,
           changeType: 'added',
-          description: `[${sceneLabel}] 新增${TRACK_LABELS[cB.trackType]} cue ${describeCue(cB)} @ ${cB.time.toFixed(1)}s`,
+          description: `[${sceneLabel}] 新增${TRACK_LABELS[cB.trackType]} ${describeCue(cB, namesB)} @ ${cB.time.toFixed(1)}s`,
           cueId: id,
         })
       }
@@ -271,7 +280,7 @@ export const useAnnotationStore = defineStore('annotation', () => {
         diffs.push({
           trackType: cA.trackType,
           changeType: 'removed',
-          description: `[${sceneLabel}] 删除${TRACK_LABELS[cA.trackType]} cue ${describeCue(cA)} @ ${cA.time.toFixed(1)}s`,
+          description: `[${sceneLabel}] 删除${TRACK_LABELS[cA.trackType]} ${describeCue(cA, namesA)} @ ${cA.time.toFixed(1)}s`,
           cueId: id,
         })
       }
@@ -286,31 +295,40 @@ export const useAnnotationStore = defineStore('annotation', () => {
         changes.push(`位置 ${POSITION_LABELS[cA.position]}→${POSITION_LABELS[cB.position]}`)
       if (cA.brightness !== cB.brightness) changes.push(`亮度 ${cA.brightness}%→${cB.brightness}%`)
       if (cA.volume !== cB.volume) changes.push(`音量 ${cA.volume}%→${cB.volume}%`)
-      if (cA.resourceId !== cB.resourceId) changes.push('资源变更')
-      if (cA.narration !== cB.narration) changes.push('旁白内容变更')
+      if (cA.resourceId !== cB.resourceId) {
+        const nameA = namesA[cA.resourceId] || describeCue(cA, namesA)
+        const nameB = namesB[cB.resourceId] || describeCue(cB, namesB)
+        changes.push(`${nameA}→${nameB}`)
+      }
+      if (cA.narration !== cB.narration) {
+        const shortA = cA.narration.length > 8 ? cA.narration.slice(0, 8) + '…' : cA.narration
+        const shortB = cB.narration.length > 8 ? cB.narration.slice(0, 8) + '…' : cB.narration
+        changes.push(`旁白"${shortA}"→"${shortB}"`)
+      }
       if (changes.length > 0) {
         diffs.push({
           trackType: cA.trackType,
           changeType: 'modified',
-          description: `[${sceneLabel}] ${TRACK_LABELS[cA.trackType]} ${describeCue(cA)} ${changes.join('，')}`,
+          description: `[${sceneLabel}] ${TRACK_LABELS[cA.trackType]} ${describeCue(cA, namesA)} ${changes.join('，')}`,
           cueId: id,
         })
       }
     }
   }
 
-  function describeCue(cue: CuePoint): string {
+  function describeCue(cue: CuePoint, resourceNames?: Record<string, string>): string {
+    const resName = resourceNames?.[cue.resourceId]
     switch (cue.trackType) {
       case 'character':
-        return POSITION_LABELS[cue.position]
+        return resName ? `${resName}(${POSITION_LABELS[cue.position]})` : POSITION_LABELS[cue.position]
       case 'lighting':
         return `亮度${cue.brightness}%`
       case 'sound':
-        return `音量${cue.volume}%`
+        return resName ? `${resName}(音量${cue.volume}%)` : `音量${cue.volume}%`
       case 'narration':
         return cue.narration?.slice(0, 10) || '旁白'
       case 'backdrop':
-        return '幕景切换'
+        return resName ? `${resName}` : '幕景切换'
       default:
         return ''
     }

@@ -168,6 +168,9 @@ function onSnapshotAction(key: string, id: string) {
       onPositiveClick: () => {
         const result = annotationStore.restoreSnapshot(id)
         if (result.ok) {
+          selectedIds.value = []
+          showDiff.value = false
+          diffResult.value = []
           playbackStore.reset()
           timelineStore.selectCue(null)
           message.success('版本已恢复')
@@ -179,6 +182,10 @@ function onSnapshotAction(key: string, id: string) {
   } else if (key === 'delete') {
     annotationStore.deleteSnapshot(id)
     selectedIds.value = selectedIds.value.filter((sid) => sid !== id)
+    if (selectedIds.value.length < 2) {
+      showDiff.value = false
+      diffResult.value = []
+    }
     message.success('快照已删除')
   }
 }

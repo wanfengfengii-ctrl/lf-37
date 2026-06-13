@@ -83,6 +83,7 @@ export interface VersionSnapshot {
   label: string
   scenes: Scene[]
   annotations: Annotation[]
+  resourceNames: Record<string, string>
   createdAt: string
 }
 
