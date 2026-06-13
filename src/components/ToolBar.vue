@@ -60,6 +60,16 @@
     <validation-badge />
 
     <n-space size="small" style="margin-left: auto;">
+      <n-tag 
+        v-if="sceneStore.lastSavedAt" 
+        size="tiny" 
+        round 
+        :bordered="false" 
+        type="success"
+        :title="'上次保存: ' + formatLastSaved(sceneStore.lastSavedAt)"
+      >
+        💾 已自动保存
+      </n-tag>
       <n-button size="small" @click="onExport">
         <template #icon><n-icon><component :is="DownloadOutlined" /></n-icon></template>
         导出
@@ -77,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, watch, ref } from 'vue'
+import { computed, h, watch, ref, nextTick } from 'vue'
 import { NButton, NDivider, NIcon, NInputNumber, NSelect, NSpace, NSlider, NText, useMessage } from 'naive-ui'
 import {
   PlayCircleOutlined,
@@ -91,11 +101,13 @@ import {
 import { useSceneStore } from '@/stores/scene'
 import { usePlaybackStore } from '@/stores/playback'
 import { useTimelineStore } from '@/stores/timeline'
+import { useResourceStore } from '@/stores/resource'
 import ValidationBadge from './ValidationBadge.vue'
 
 const sceneStore = useSceneStore()
 const playbackStore = usePlaybackStore()
 const timelineStore = useTimelineStore()
+const resourceStore = useResourceStore()
 const message = useMessage()
 
 const durationValue = ref(sceneStore.currentScene?.duration ?? 120)
@@ -134,6 +146,21 @@ function formatTime(t: number) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${ms}`
 }
 
+function formatLastSaved(isoString: string): string {
+  try {
+    const date = new Date(isoString)
+    return date.toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  } catch {
+    return ''
+  }
+}
+
 function togglePlay() {
   if (playbackStore.isPlaying) playbackStore.pause()
   else playbackStore.play()
@@ -154,8 +181,15 @@ function onSave() {
 
 function onExport() {
   try {
+    const exportScenes = sceneStore.scenes.map(s => ({
+      ...s,
+      cues: s.cues.map(c => {
+        const res = c.resourceId ? resourceStore.getResourceById(c.resourceId) : null
+        return { ...c, _resourceName: res?.name || '' }
+      }),
+    }))
     const data = {
-      scenes: sceneStore.scenes,
+      scenes: exportScenes,
       version: 1,
       exportedAt: new Date().toISOString(),
     }
@@ -172,6 +206,31 @@ function onExport() {
   }
 }
 
+function remapResourceIds(scenes: any[]) {
+  const allResources = resourceStore.resources
+  const nameTypeMap = new Map<string, string>()
+  for (const r of allResources) {
+    nameTypeMap.set(`${r.type}:${r.name}`, r.id)
+  }
+  for (const scene of scenes) {
+    for (const cue of scene.cues) {
+      if (cue.resourceId && !allResources.some(r => r.id === cue.resourceId)) {
+        const resName = cue._resourceName || ''
+        const trackToType: Record<string, string> = {
+          character: 'character',
+          sound: 'sound',
+          backdrop: 'backdrop',
+        }
+        const resType = trackToType[cue.trackType] || ''
+        const mappedId = nameTypeMap.get(`${resType}:${resName}`)
+        if (mappedId) {
+          cue.resourceId = mappedId
+        }
+      }
+    }
+  }
+}
+
 function onImport() {
   const input = document.createElement('input')
   input.type = 'file'
@@ -184,10 +243,16 @@ function onImport() {
       try {
         const data = JSON.parse(reader.result as string)
         if (data.scenes && Array.isArray(data.scenes)) {
+          remapResourceIds(data.scenes)
           const result = sceneStore.replaceAllScenes(data.scenes)
           if (result.ok) {
             timelineStore.selectCue(null)
             playbackStore.reset()
+            nextTick(() => {
+              timelineStore.detectCharacterConflicts()
+              playbackStore.computeStageState()
+              playbackStore.triggerSequenceUpdate()
+            })
             message.success(`导入成功，共 ${result.count} 个场次`)
           } else {
             message.error(result.message || '导入失败')

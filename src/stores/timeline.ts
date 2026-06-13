@@ -1,10 +1,16 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { CuePoint, TrackType, StagePosition } from '@/types'
 import { useSceneStore } from './scene'
 import { TRACK_ORDER } from '@/types'
 
 const genId = () => Math.random().toString(36).slice(2, 10)
+
+export const SNAP_GRID = 0.5
+
+export function snapToGrid(time: number, grid: number = SNAP_GRID): number {
+  return Math.round(time / grid) * grid
+}
 
 export const useTimelineStore = defineStore('timeline', () => {
   const sceneStore = useSceneStore()
@@ -39,14 +45,31 @@ export const useTimelineStore = defineStore('timeline', () => {
     currentCues.value.find((c) => c.id === selectedCueId.value) ?? null
   )
 
+  watch(
+    () => sceneStore.currentSceneId,
+    () => {
+      selectedCueId.value = null
+      detectCharacterConflicts()
+    }
+  )
+
+  watch(
+    () => currentCues.value.map((c) => `${c.id}:${c.time}:${c.position}:${c.resourceId}`).join('|'),
+    () => {
+      detectCharacterConflicts()
+    },
+    { deep: true }
+  )
+
   function addCue(partial: Partial<CuePoint> & { trackType: TrackType; time: number }) {
     const scene = sceneStore.currentScene
     if (!scene) return null
+    const snappedTime = snapToGrid(partial.time)
     const cue: CuePoint = {
       id: genId(),
       sceneId: scene.id,
       trackType: partial.trackType,
-      time: partial.time,
+      time: Math.max(0, Math.min(scene.duration, snappedTime)),
       resourceId: partial.resourceId ?? '',
       brightness: partial.brightness ?? (partial.trackType === 'lighting' ? 80 : 0),
       volume: partial.volume ?? (partial.trackType === 'sound' ? 70 : 0),
@@ -74,20 +97,18 @@ export const useTimelineStore = defineStore('timeline', () => {
     const cue = currentCues.value.find((c) => c.id === id)
     if (!cue) return
     Object.assign(cue, patch)
-    if (patch.time !== undefined || patch.position !== undefined) {
-      detectCharacterConflicts()
-    }
     if (patch.brightness !== undefined) {
       cue.brightness = Math.max(0, Math.min(100, cue.brightness))
     }
   }
 
-  function updateCueTime(id: string, time: number) {
+  function updateCueTime(id: string, time: number, snap: boolean = true) {
     const cue = currentCues.value.find((c) => c.id === id)
     if (!cue) return
     const scene = sceneStore.currentScene
     if (!scene) return
-    cue.time = Math.max(0, Math.min(scene.duration, time))
+    const newTime = snap ? snapToGrid(time) : time
+    cue.time = Math.max(0, Math.min(scene.duration, newTime))
     ensureTimeOrder(cue.trackType)
     detectCharacterConflicts()
   }
@@ -99,28 +120,82 @@ export const useTimelineStore = defineStore('timeline', () => {
       .filter((c) => c.trackType === trackType)
       .sort((a, b) => a.time - b.time)
     for (let i = 1; i < trackCues.length; i++) {
-      if (trackCues[i].time < trackCues[i - 1].time) {
-        trackCues[i].time = trackCues[i - 1].time
+      const prev = trackCues[i - 1].time
+      const minNext = prev + SNAP_GRID
+      if (trackCues[i].time < minNext) {
+        trackCues[i].time = Math.min(scene.duration, minNext)
       }
     }
   }
 
   function detectCharacterConflicts() {
     const conflicts = new Set<string>()
-    const charCues = currentCues.value.filter((c) => c.trackType === 'character')
-    for (let i = 0; i < charCues.length; i++) {
-      for (let j = i + 1; j < charCues.length; j++) {
-        const a = charCues[i]
-        const b = charCues[j]
-        if (a.resourceId && a.resourceId === b.resourceId && a.position !== b.position) {
-          const timeDiff = Math.abs(a.time - b.time)
-          if (timeDiff < 3) {
-            conflicts.add(a.id)
-            conflicts.add(b.id)
+    const charCues = currentCues.value
+      .filter((c) => c.trackType === 'character' && c.resourceId)
+      .sort((a, b) => a.time - b.time)
+
+    const byCharacter = new Map<string, CuePoint[]>()
+    for (const cue of charCues) {
+      if (!byCharacter.has(cue.resourceId)) {
+        byCharacter.set(cue.resourceId, [])
+      }
+      byCharacter.get(cue.resourceId)!.push(cue)
+    }
+
+    const EPSILON = 0.3
+    const MIN_TRANSITION_TIME = 3.0
+
+    for (const [, cues] of byCharacter) {
+      const usedTimes = new Map<number, Set<StagePosition>>()
+      for (const cue of cues) {
+        const snappedTime = Math.round(cue.time * 2) / 2
+        if (!usedTimes.has(snappedTime)) {
+          usedTimes.set(snappedTime, new Set())
+        }
+        usedTimes.get(snappedTime)!.add(cue.position)
+      }
+
+      for (const [t, positions] of usedTimes) {
+        if (positions.size > 1) {
+          for (const cue of cues) {
+            const cueSnapped = Math.round(cue.time * 2) / 2
+            if (Math.abs(cueSnapped - t) < EPSILON) {
+              conflicts.add(cue.id)
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < cues.length; i++) {
+        for (let j = i + 1; j < cues.length; j++) {
+          const a = cues[i]
+          const b = cues[j]
+          if (Math.abs(a.time - b.time) < EPSILON) {
+            if (a.position !== b.position) {
+              conflicts.add(a.id)
+              conflicts.add(b.id)
+            }
+          } else if (b.time - a.time < MIN_TRANSITION_TIME && a.position !== b.position) {
+            let hasTransition = false
+            for (let k = i + 1; k < j; k++) {
+              if (cues[k].position === b.position) {
+                hasTransition = true
+                break
+              }
+              if (cues[k].position !== a.position) {
+                hasTransition = true
+                break
+              }
+            }
+            if (!hasTransition) {
+              conflicts.add(a.id)
+              conflicts.add(b.id)
+            }
           }
         }
       }
     }
+
     conflictCueIds.value = conflicts
   }
 
@@ -153,5 +228,7 @@ export const useTimelineStore = defineStore('timeline', () => {
     selectCue,
     isCueInConflict,
     getPlaybackSequence,
+    snapToGrid,
+    SNAP_GRID,
   }
 })

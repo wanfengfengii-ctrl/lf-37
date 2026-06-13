@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Scene, ValidationError } from '@/types'
 
 const genId = () => Math.random().toString(36).slice(2, 10)
+const STORAGE_KEY = 'shadow-puppet-stage'
 
-export const useSceneStore = defineStore('scene', () => {
-  const scenes = ref<Scene[]>([
+function createDefaultScenes(): Scene[] {
+  return [
     {
       id: genId(),
       sceneNumber: '第一场',
@@ -13,9 +14,97 @@ export const useSceneStore = defineStore('scene', () => {
       duration: 120,
       cues: [],
     },
-  ])
-  const currentSceneId = ref<string>(scenes.value[0].id)
+  ]
+}
+
+interface StorageData {
+  scenes: Scene[]
+  version: number
+  savedAt?: string
+}
+
+function loadFromStorage(): { scenes: Scene[]; savedAt?: string } | null {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved) {
+      const data: StorageData = JSON.parse(saved)
+      if (data.scenes && Array.isArray(data.scenes) && data.scenes.length > 0) {
+        return { scenes: data.scenes, savedAt: data.savedAt }
+      }
+    }
+  } catch (e) {
+    console.warn('[AutoRestore] Failed to load from storage:', e)
+  }
+  return null
+}
+
+function saveToStorage(scenes: Scene[]) {
+  try {
+    const data = {
+      scenes,
+      version: 1,
+      savedAt: new Date().toISOString(),
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  } catch (e) {
+    console.warn('[AutoSave] Failed to save to storage:', e)
+  }
+}
+
+export const useSceneStore = defineStore('scene', () => {
+  const savedData = loadFromStorage()
+  const initialScenes = savedData?.scenes || createDefaultScenes()
+  
+  const scenes = ref<Scene[]>(initialScenes)
+  const currentSceneId = ref<string>(initialScenes[0].id)
   const validationErrors = ref<ValidationError[]>([])
+  const autoSaveEnabled = ref(true)
+  const lastSavedAt = ref<string | null>(savedData?.savedAt ?? null)
+
+  let autoSaveTimer: number | null = null
+
+  function scheduleAutoSave() {
+    if (!autoSaveEnabled.value) return
+    if (autoSaveTimer !== null) {
+      clearTimeout(autoSaveTimer)
+    }
+    autoSaveTimer = window.setTimeout(() => {
+      saveToStorage(scenes.value)
+      lastSavedAt.value = new Date().toISOString()
+      console.log('[AutoSave] Saved automatically at', new Date().toLocaleTimeString())
+    }, 1000)
+  }
+
+  function restoreFromStorage(): { ok: boolean; message?: string } {
+    const saved = loadFromStorage()
+    if (saved) {
+      scenes.value = [...saved.scenes]
+      if (saved.scenes.length > 0) {
+        currentSceneId.value = saved.scenes[0].id
+      }
+      lastSavedAt.value = saved.savedAt ?? new Date().toISOString()
+      return { ok: true, message: `已恢复 ${saved.scenes.length} 个场次` }
+    }
+    return { ok: false, message: '没有找到已保存的编排' }
+  }
+
+  function clearSavedData() {
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+      lastSavedAt.value = null
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, message: '清除失败' }
+    }
+  }
+
+  watch(
+    () => scenes.value.map((s) => `${s.id}:${s.sceneNumber}:${s.performable}:${s.duration}:${s.cues.length}:${s.cues.map((c) => c.time).join(',')}`).join('|'),
+    () => {
+      scheduleAutoSave()
+    },
+    { deep: true }
+  )
 
   const currentScene = computed(() =>
     scenes.value.find((s) => s.id === currentSceneId.value)
@@ -138,7 +227,7 @@ export const useSceneStore = defineStore('scene', () => {
       }
       seenNumbers.add(s.sceneNumber)
     }
-    scenes.value.splice(0, scenes.value.length, ...imported)
+    scenes.value = [...imported]
     currentSceneId.value = imported[0].id
     return { ok: true, count: imported.length }
   }
@@ -148,6 +237,8 @@ export const useSceneStore = defineStore('scene', () => {
     currentSceneId,
     currentScene,
     validationErrors,
+    autoSaveEnabled,
+    lastSavedAt,
     sceneNumberMap,
     isSceneNumberUnique,
     createScene,
@@ -159,5 +250,8 @@ export const useSceneStore = defineStore('scene', () => {
     setPerformable,
     setErrors,
     replaceAllScenes,
+    restoreFromStorage,
+    clearSavedData,
+    scheduleAutoSave,
   }
 })

@@ -24,24 +24,77 @@ export function validateSceneNumberUnique(
 
 export function validateCharacterConflict(cues: CuePoint[]): ValidationError[] {
   const errors: ValidationError[] = []
-  const charCues = cues.filter((c) => c.trackType === 'character')
-  for (let i = 0; i < charCues.length; i++) {
-    for (let j = i + 1; j < charCues.length; j++) {
-      const a = charCues[i]
-      const b = charCues[j]
-      if (a.resourceId && a.resourceId === b.resourceId && a.position !== b.position) {
-        const timeDiff = Math.abs(a.time - b.time)
-        if (timeDiff < 3) {
-          errors.push({
-            rule: 'R2',
-            message: `角色在 ${a.time.toFixed(1)}s (${POSITION_LABELS[a.position]}) 和 ${b.time.toFixed(1)}s (${POSITION_LABELS[b.position]}) 冲突（同一角色不能同时在两个幕位，间隔 <3s）`,
-            cueId: a.id,
-          })
-          errors.push({
-            rule: 'R2',
-            message: `角色在 ${b.time.toFixed(1)}s (${POSITION_LABELS[b.position]}) 和 ${a.time.toFixed(1)}s (${POSITION_LABELS[a.position]}) 冲突（同一角色不能同时在两个幕位，间隔 <3s）`,
-            cueId: b.id,
-          })
+  const EPSILON = 0.3
+  const MIN_TRANSITION_TIME = 3.0
+  const charCues = cues
+    .filter((c) => c.trackType === 'character' && c.resourceId)
+    .sort((a, b) => a.time - b.time)
+
+  const byCharacter = new Map<string, CuePoint[]>()
+  for (const cue of charCues) {
+    if (!byCharacter.has(cue.resourceId)) {
+      byCharacter.set(cue.resourceId, [])
+    }
+    byCharacter.get(cue.resourceId)!.push(cue)
+  }
+
+  for (const [, charCues] of byCharacter) {
+    const usedTimes = new Map<number, Set<string>>()
+    for (const cue of charCues) {
+      const snappedTime = Math.round(cue.time * 2) / 2
+      if (!usedTimes.has(snappedTime)) {
+        usedTimes.set(snappedTime, new Set())
+      }
+      usedTimes.get(snappedTime)!.add(cue.position)
+    }
+
+    for (const [t, positions] of usedTimes) {
+      if (positions.size > 1) {
+        const posArr = Array.from(positions)
+        errors.push({
+          rule: 'R2',
+          message: `角色在同一时刻 ${t.toFixed(1)}s 同时出现在 ${posArr.map(p => POSITION_LABELS[p as keyof typeof POSITION_LABELS]).join(' 和 ')}`,
+        })
+      }
+    }
+
+    for (let i = 0; i < charCues.length; i++) {
+      for (let j = i + 1; j < charCues.length; j++) {
+        const a = charCues[i]
+        const b = charCues[j]
+        if (Math.abs(a.time - b.time) < EPSILON) {
+          if (a.position !== b.position) {
+            errors.push({
+              rule: 'R2',
+              message: `角色在同一时刻 ${a.time.toFixed(1)}s 不能同时在 ${POSITION_LABELS[a.position]} 和 ${POSITION_LABELS[b.position]}`,
+              cueId: a.id,
+            })
+            errors.push({
+              rule: 'R2',
+              message: `角色在同一时刻 ${b.time.toFixed(1)}s 不能同时在 ${POSITION_LABELS[b.position]} 和 ${POSITION_LABELS[a.position]}`,
+              cueId: b.id,
+            })
+          }
+        } else if (b.time - a.time < MIN_TRANSITION_TIME && a.position !== b.position) {
+          let hasTransition = false
+          for (let k = i + 1; k < j; k++) {
+            if (charCues[k].position === b.position || charCues[k].position !== a.position) {
+              hasTransition = true
+              break
+            }
+          }
+          if (!hasTransition) {
+            errors.push({
+              rule: 'R2',
+              message: `角色在 ${a.time.toFixed(1)}s (${POSITION_LABELS[a.position]}) 到 ${b.time.toFixed(1)}s (${POSITION_LABELS[b.position]}) 间隔不足3秒，无法完成跨幕位移动`,
+              cueId: a.id,
+            })
+            errors.push({
+              rule: 'R2',
+              message: `角色在 ${b.time.toFixed(1)}s (${POSITION_LABELS[b.position]}) 与前一位置 ${a.time.toFixed(1)}s (${POSITION_LABELS[a.position]}) 间隔不足3秒`,
+              cueId: b.id,
+            })
+          }
         }
       }
     }

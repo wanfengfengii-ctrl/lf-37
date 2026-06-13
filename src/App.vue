@@ -7,6 +7,10 @@
             <div class="app-root">
               <tool-bar />
 
+              <div class="stage-wrapper">
+                <stage-preview />
+              </div>
+
               <div class="main-layout">
                 <aside class="left-panel">
                   <resource-panel />
@@ -86,7 +90,9 @@ import {
   NText,
 } from 'naive-ui'
 import { DeleteOutlined, SettingOutlined } from '@vicons/antd'
+import { onMounted, nextTick } from 'vue'
 import ToolBar from '@/components/ToolBar.vue'
+import StagePreview from '@/components/StagePreview.vue'
 import ResourcePanel from '@/components/ResourcePanel.vue'
 import Timeline from '@/components/Timeline.vue'
 import SceneBar from '@/components/SceneBar.vue'
@@ -96,9 +102,32 @@ import SoundConfig from '@/components/SoundConfig.vue'
 import NarrationConfig from '@/components/NarrationConfig.vue'
 import BackdropConfig from '@/components/BackdropConfig.vue'
 import { useTimelineStore } from '@/stores/timeline'
+import { usePlaybackStore } from '@/stores/playback'
+import { useSceneStore } from '@/stores/scene'
 import { TRACK_COLORS, TRACK_LABELS } from '@/types'
+import { useMessage } from 'naive-ui'
 
 const timelineStore = useTimelineStore()
+const playbackStore = usePlaybackStore()
+const sceneStore = useSceneStore()
+const message = useMessage()
+
+onMounted(() => {
+  if (sceneStore.lastSavedAt) {
+    nextTick(() => {
+      timelineStore.detectCharacterConflicts()
+      playbackStore.computeStageState()
+      playbackStore.triggerSequenceUpdate()
+      const savedTime = new Date(sceneStore.lastSavedAt).toLocaleString('zh-CN', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      message.info(`已自动恢复上次保存的编排（${savedTime}）`)
+    })
+  }
+})
 
 function formatCueTime(t: number) {
   const m = Math.floor(t / 60)
@@ -123,10 +152,19 @@ function onDeleteCue() {
   background: #f0f2f5;
 }
 
+.stage-wrapper {
+  height: 320px;
+  flex-shrink: 0;
+  padding: 12px 16px;
+  background: linear-gradient(180deg, #1a1a2e 0%, #16162a 100%);
+  border-bottom: 1px solid rgba(192, 57, 43, 0.3);
+}
+
 .main-layout {
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-height: 0;
 }
 
 .left-panel {

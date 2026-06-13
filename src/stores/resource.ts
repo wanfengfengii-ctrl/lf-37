@@ -22,11 +22,11 @@ const mockBackdrops: Resource[] = [
 ]
 
 const mockSounds: Resource[] = [
-  { id: genId(), type: 'sound', name: '开场锣', icon: '🥁', audioUrl: '', imageUrl: '' },
-  { id: genId(), type: 'sound', name: '急促鼓点', icon: '🎵', audioUrl: '', imageUrl: '' },
-  { id: genId(), type: 'sound', name: '幕间钹', icon: '🎶', audioUrl: '', imageUrl: '' },
-  { id: genId(), type: 'sound', name: '战鼓', icon: '🥁', audioUrl: '', imageUrl: '' },
-  { id: genId(), type: 'sound', name: '收尾锣', icon: '🔔', audioUrl: '', imageUrl: '' },
+  { id: genId(), type: 'sound', name: '开场锣', icon: '🥁', audioUrl: 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3', imageUrl: '' },
+  { id: genId(), type: 'sound', name: '急促鼓点', icon: '🎵', audioUrl: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3', imageUrl: '' },
+  { id: genId(), type: 'sound', name: '幕间钹', icon: '🎶', audioUrl: 'https://assets.mixkit.co/active_storage/sfx/2570/2570-preview.mp3', imageUrl: '' },
+  { id: genId(), type: 'sound', name: '战鼓', icon: '🥁', audioUrl: 'https://assets.mixkit.co/active_storage/sfx/2567/2567-preview.mp3', imageUrl: '' },
+  { id: genId(), type: 'sound', name: '收尾锣', icon: '🔔', audioUrl: 'https://assets.mixkit.co/active_storage/sfx/2569/2569-preview.mp3', imageUrl: '' },
 ]
 
 export const useResourceStore = defineStore('resource', () => {

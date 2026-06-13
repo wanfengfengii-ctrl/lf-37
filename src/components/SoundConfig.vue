@@ -111,14 +111,19 @@ function onPreview() {
       previewHowl.stop()
       previewHowl.unload()
     }
+    const res = selectedResourceId.value ? resourceStore.getResourceById(selectedResourceId.value) : null
+    const audioUrl = res?.audioUrl || 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'
     previewHowl = new Howl({
-      src: ['https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'],
+      src: [audioUrl],
       volume: (volume.value ?? 70) / 100,
+      onloaderror: () => {
+        message.warning('音效加载失败')
+      },
     })
     previewHowl.play()
-    message.info('正在播放试听音效...')
+    message.info(`正在试听：${res?.name || '默认音效'}`)
   } catch (e) {
-    message.warning('音效加载失败')
+    message.warning('音效播放失败')
   }
 }
 
