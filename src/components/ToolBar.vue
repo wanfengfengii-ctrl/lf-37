@@ -59,6 +59,26 @@
 
     <validation-badge />
 
+    <n-space size="small">
+      <n-button size="small" :type="annotationStore.showAnnotationPanel ? 'primary' : 'default'" @click="annotationStore.showAnnotationPanel = !annotationStore.showAnnotationPanel">
+        <template #icon><n-icon><component :is="CommentOutlined" /></n-icon></template>
+        批注
+      </n-button>
+      <n-button size="small" :type="annotationStore.showVersionPanel ? 'primary' : 'default'" @click="annotationStore.showVersionPanel = !annotationStore.showVersionPanel">
+        <template #icon><n-icon><component :is="HistoryOutlined" /></n-icon></template>
+        版本
+      </n-button>
+      <n-tag
+        v-if="annotationStore.pendingRiskCount > 0"
+        size="tiny"
+        round
+        :bordered="false"
+        type="error"
+      >
+        ⚠️ {{ annotationStore.pendingRiskCount }} 风险
+      </n-tag>
+    </n-space>
+
     <n-space size="small" style="margin-left: auto;">
       <n-tag 
         v-if="sceneStore.lastSavedAt" 
@@ -97,17 +117,21 @@ import {
   UploadOutlined,
   SaveOutlined,
   SkinOutlined,
+  CommentOutlined,
+  HistoryOutlined,
 } from '@vicons/antd'
 import { useSceneStore } from '@/stores/scene'
 import { usePlaybackStore } from '@/stores/playback'
 import { useTimelineStore } from '@/stores/timeline'
 import { useResourceStore } from '@/stores/resource'
+import { useAnnotationStore } from '@/stores/annotation'
 import ValidationBadge from './ValidationBadge.vue'
 
 const sceneStore = useSceneStore()
 const playbackStore = usePlaybackStore()
 const timelineStore = useTimelineStore()
 const resourceStore = useResourceStore()
+const annotationStore = useAnnotationStore()
 const message = useMessage()
 
 const durationValue = ref(sceneStore.currentScene?.duration ?? 120)
@@ -173,7 +197,8 @@ function onSave() {
       version: 1,
     }
     localStorage.setItem('shadow-puppet-stage', JSON.stringify(data))
-    message.success('已保存到本地')
+    annotationStore.createSnapshot()
+    message.success('已保存到本地，并自动生成版本快照')
   } catch (e) {
     message.error('保存失败')
   }

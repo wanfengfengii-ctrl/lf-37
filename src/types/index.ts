@@ -63,4 +63,34 @@ export const POSITION_LABELS: Record<StagePosition, string> = {
   lower: '下幕位',
 }
 
+export type AnnotationType = 'director' | 'actor' | 'risk'
+
+export type AnnotationStatus = 'pending' | 'in_progress' | 'resolved'
+
+export interface Annotation {
+  id: string
+  sceneId: string
+  cueId?: string
+  type: AnnotationType
+  content: string
+  status: AnnotationStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VersionSnapshot {
+  id: string
+  label: string
+  scenes: Scene[]
+  annotations: Annotation[]
+  createdAt: string
+}
+
+export interface VersionDiffItem {
+  trackType: TrackType
+  changeType: 'added' | 'removed' | 'modified'
+  description: string
+  cueId?: string
+}
+
 export const TRACK_ORDER: TrackType[] = ['character', 'lighting', 'sound', 'narration', 'backdrop']

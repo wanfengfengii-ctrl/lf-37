@@ -24,6 +24,9 @@
           <n-tag v-if="playbackStore.conflictPositions.size > 0" size="tiny" round :bordered="false" type="error">
             ⚠️ 冲突
           </n-tag>
+          <n-tag v-if="currentRiskAnnotations.length > 0" size="tiny" round :bordered="false" type="error" class="risk-alert-tag">
+            ⚠️ {{ currentRiskAnnotations.length }} 条风险
+          </n-tag>
         </n-space>
       </n-space>
     </div>
@@ -159,6 +162,31 @@
         </div>
       </transition>
 
+      <transition name="annotation-slide">
+        <div v-if="playbackAnnotations.length > 0 && (playbackStore.isPlaying || playbackStore.currentTime > 0)" class="annotation-overlay">
+          <div
+            v-for="ann in playbackAnnotations"
+            :key="ann.id"
+            class="annotation-badge"
+            :class="{
+              'badge-risk': ann.type === 'risk',
+              'badge-director': ann.type === 'director',
+              'badge-actor': ann.type === 'actor',
+              'badge-resolved': ann.status === 'resolved',
+            }"
+          >
+            <span class="badge-icon">{{ ann.type === 'risk' ? '⚠️' : ann.type === 'director' ? '🎬' : '🎭' }}</span>
+            <span class="badge-text">{{ ann.content }}</span>
+          </div>
+        </div>
+      </transition>
+
+      <transition name="risk-alert-overlay">
+        <div v-if="currentRiskAnnotations.length > 0 && playbackStore.isPlaying" class="risk-alert-layer">
+          <div class="risk-alert-stripe"></div>
+        </div>
+      </transition>
+
       <div class="playback-progress" v-if="playbackStore.isPlaying || playbackStore.currentTime > 0">
         <div class="progress-bar" :style="{ width: playbackStore.progressPercent + '%' }"></div>
       </div>
@@ -171,9 +199,11 @@ import { computed } from 'vue'
 import { PlayCircleOutlined } from '@vicons/antd'
 import { NIcon, NSpace, NTag, NText } from 'naive-ui'
 import { usePlaybackStore, type CharacterOnStage } from '@/stores/playback'
+import { useAnnotationStore } from '@/stores/annotation'
 import type { StagePosition } from '@/types'
 
 const playbackStore = usePlaybackStore()
+const annotationStore = useAnnotationStore()
 
 const stageStyle = computed(() => ({
   background: playbackStore.currentBackdrop ? '#3d2817' : '#2a1a0f',
@@ -215,6 +245,14 @@ const charactersByPosition = computed<Record<StagePosition, CharacterOnStage[]>>
   }
   return result
 })
+
+const playbackAnnotations = computed(() =>
+  annotationStore.getAnnotationsForTime(playbackStore.currentTime)
+)
+
+const currentRiskAnnotations = computed(() =>
+  annotationStore.getRiskAnnotationsForTime(playbackStore.currentTime)
+)
 </script>
 
 <style scoped>
@@ -611,5 +649,135 @@ const charactersByPosition = computed<Record<StagePosition, CharacterOnStage[]>>
   transition: width 0.1s linear;
   border-radius: 0 2px 2px 0;
   box-shadow: 0 0 6px rgba(192, 57, 43, 0.5);
+}
+
+.risk-alert-tag {
+  animation: riskTagPulse 1s ease-in-out infinite;
+}
+
+@keyframes riskTagPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.annotation-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 260px;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.annotation-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  backdrop-filter: blur(8px);
+  animation: annotationFadeIn 0.3s ease-out;
+}
+
+@keyframes annotationFadeIn {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.annotation-badge.badge-risk {
+  background: rgba(255, 77, 79, 0.9);
+  color: #fff;
+  border: 1px solid #ff4d4f;
+  box-shadow: 0 0 8px rgba(255, 77, 79, 0.4);
+  animation: riskBadgePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes riskBadgePulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(255, 77, 79, 0.4); }
+  50% { box-shadow: 0 0 16px rgba(255, 77, 79, 0.7); }
+}
+
+.annotation-badge.badge-director {
+  background: rgba(230, 162, 60, 0.85);
+  color: #fff;
+  border: 1px solid rgba(230, 162, 60, 0.6);
+}
+
+.annotation-badge.badge-actor {
+  background: rgba(64, 158, 255, 0.85);
+  color: #fff;
+  border: 1px solid rgba(64, 158, 255, 0.6);
+}
+
+.annotation-badge.badge-resolved {
+  opacity: 0.5;
+}
+
+.badge-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.badge-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-slide-enter-active,
+.annotation-slide-leave-active {
+  transition: all 0.3s ease;
+}
+
+.annotation-slide-enter-from,
+.annotation-slide-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+.risk-alert-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 11;
+}
+
+.risk-alert-stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: repeating-linear-gradient(
+    90deg,
+    #ff4d4f 0px,
+    #ff4d4f 8px,
+    transparent 8px,
+    transparent 16px
+  );
+  animation: riskStripeMove 1s linear infinite;
+}
+
+@keyframes riskStripeMove {
+  from { transform: translateX(0); }
+  to { transform: translateX(16px); }
+}
+
+.risk-alert-overlay-enter-active,
+.risk-alert-overlay-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.risk-alert-overlay-enter-from,
+.risk-alert-overlay-leave-to {
+  opacity: 0;
 }
 </style>
